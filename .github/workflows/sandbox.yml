@@ -43,8 +43,12 @@ jobs:
         run: |
           FILE_PATH=$(jq -r '.file_path' /tmp/fix_data.json)
           EXPLANATION=$(jq -r '.explanation' /tmp/fix_data.json)
+
+          # Sanitize explanation for GITHUB_OUTPUT (remove backticks, quotes, newlines)
+          SANITIZED_EXPLANATION=$(echo "$EXPLANATION" | tr -d '`' | tr -d "'" | tr '\n' ' ' | tr -s ' ')
+
           echo "file_path=$FILE_PATH" >> $GITHUB_OUTPUT
-          echo "explanation=$EXPLANATION" >> $GITHUB_OUTPUT
+          echo "explanation=$SANITIZED_EXPLANATION" >> $GITHUB_OUTPUT
           echo "Fixing: $FILE_PATH"
           echo "Reason: $EXPLANATION"
 

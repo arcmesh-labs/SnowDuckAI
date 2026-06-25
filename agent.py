@@ -21,17 +21,27 @@ from notifier import get_notifier
 class ProjectRedAgent:
     """Coordinates the dbt error diagnosis and fix workflow."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], diagnose_only: bool = False):
         """Initialize the agent with configuration.
 
         Args:
             config: Configuration dict loaded from config.yml
+            diagnose_only: If True, only initialize LLM client (skip sandbox/git/notify)
         """
         self.config = config
+        self.diagnose_only = diagnose_only
         self.llm_client = get_llm_client(config)
-        self.sandbox_client = get_sandbox_client(config)
-        self.git_handler = get_git_handler(config)
-        self.notifier = get_notifier(config)
+
+        # Only initialize these if running full workflow
+        if not diagnose_only:
+            self.sandbox_client = get_sandbox_client(config)
+            self.git_handler = get_git_handler(config)
+            self.notifier = get_notifier(config)
+        else:
+            self.sandbox_client = None
+            self.git_handler = None
+            self.notifier = None
+
         self.dbt_project_path = Path(config.get("dbt", {}).get("project_path", "./dbt-project"))
         self.conversation_history: List[Dict[str, Any]] = []
         self.max_iterations = 20
@@ -562,7 +572,7 @@ def main():
 
     try:
         config = load_config(args.config)
-        agent = ProjectRedAgent(config)
+        agent = ProjectRedAgent(config, diagnose_only=args.diagnose_only)
 
         if args.diagnose_only:
             result = agent.diagnose(log_path=args.log)
