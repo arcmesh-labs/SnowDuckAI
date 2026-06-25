@@ -73,7 +73,7 @@ jobs:
           PROJECT_DIR="tests/fixtures/dbt_project"
           mkdir -p "$PROJECT_DIR"
           cat > "$PROJECT_DIR/profiles.yml" <<EOF
-          sandbox:
+          project_red_test:
             target: dev
             outputs:
               dev:
