@@ -492,6 +492,31 @@ IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any ot
             "iterations": self.max_iterations
         }
 
+    def _strip_manifest(self, manifest: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Strip manifest to only include data needed for sandbox.
+
+        Args:
+            manifest: Full dbt manifest
+
+        Returns:
+            Stripped manifest with only model nodes and essential fields
+        """
+        if not manifest:
+            return None
+
+        stripped = {"nodes": {}}
+
+        for node_id, node in manifest.get("nodes", {}).items():
+            if node.get("resource_type") == "model":
+                stripped["nodes"][node_id] = {
+                    "unique_id": node.get("unique_id"),
+                    "name": node.get("name"),
+                    "original_file_path": node.get("original_file_path"),
+                    "compiled_code": node.get("compiled_code")
+                }
+
+        return stripped
+
     def run_full_workflow(self, log_path: Optional[str] = None) -> Dict[str, Any]:
         """Run the complete Project Red workflow.
 
@@ -523,6 +548,9 @@ IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any ot
         fix_data = diagnostic_result["fix"]
         manifest = diagnostic_result.get("manifest")
 
+        # Strip manifest to reduce payload size
+        stripped_manifest = self._strip_manifest(manifest)
+
         print("\n" + "=" * 70)
         print("Phase 2 — Sandbox Testing")
         print("=" * 70)
@@ -530,7 +558,7 @@ IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any ot
         sandbox_result = test_fix_with_retry(
             sandbox_client=self.sandbox_client,
             fix_data=fix_data,
-            manifest=manifest,
+            manifest=stripped_manifest,
             max_attempts=5
         )
 

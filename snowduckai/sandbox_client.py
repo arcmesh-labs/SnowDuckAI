@@ -98,6 +98,10 @@ class GHAClient(SandboxClient):
         trigger_time = datetime.now(timezone.utc)
         print(f"  📤 Triggering workflow at {trigger_time.isoformat()}")
 
+        import sys
+        print(f"  📦 fix_data size: {len(payload['inputs']['fix_data'])} bytes", file=sys.stderr)
+        print(f"  📦 manifest size: {len(payload['inputs']['manifest'])} bytes", file=sys.stderr)
+
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
