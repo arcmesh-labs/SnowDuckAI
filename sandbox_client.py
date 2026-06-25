@@ -1,4 +1,4 @@
-"""Sandbox client abstraction for Project Red.
+"""Sandbox client abstraction for SnowDuckAI.
 
 Supports multiple sandbox runners via a common interface:
 - GitHub Actions (open source)
@@ -267,7 +267,7 @@ class SelfHostedClient(SandboxClient):
         will depend on the specific CI system (Jenkins, Azure DevOps, etc.).
         """
         raise NotImplementedError(
-            "Self-hosted CI integration is available in Project Red Enterprise. "
+            "Self-hosted CI integration is available in SnowDuckAI Enterprise. "
             "Contact us for enterprise licensing."
         )
 

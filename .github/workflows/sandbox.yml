@@ -1,4 +1,4 @@
-name: Project Red Sandbox
+name: SnowDuckAI Sandbox
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-"""LLM client abstraction for Project Red.
+"""LLM client abstraction for SnowDuckAI.
 
 Supports multiple LLM providers via a common interface:
 - Anthropic (Claude)

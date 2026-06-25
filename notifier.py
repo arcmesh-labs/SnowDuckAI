@@ -1,4 +1,4 @@
-"""Notifier abstraction for Project Red.
+"""Notifier abstraction for SnowDuckAI.
 
 Supports multiple notification channels:
 - Email
@@ -89,8 +89,8 @@ class EmailNotifier(Notifier):
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
 
-            subject = f"✅ Project Red: PR opened — {branch}"
-            body = f"""Project Red has successfully fixed a dbt error and opened a pull request.
+            subject = f"✅ SnowDuckAI: PR opened — {branch}"
+            body = f"""SnowDuckAI has successfully fixed a dbt error and opened a pull request.
 
 PR URL: {pr_url}
 Branch: {branch}
@@ -101,7 +101,7 @@ Explanation: {fix_data['explanation']}
 Please review the pull request and merge when ready.
 
 ---
-Project Red — AI-powered dbt error resolution
+SnowDuckAI — AI-powered dbt error resolution
 """
 
             msg = MIMEMultipart()
@@ -133,11 +133,11 @@ Project Red — AI-powered dbt error resolution
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
 
-            subject = f"❌ Project Red: Failed to fix dbt error after {attempts} attempts"
+            subject = f"❌ SnowDuckAI: Failed to fix dbt error after {attempts} attempts"
 
             error_excerpt = error_log[-500:] if len(error_log) > 500 else error_log
 
-            body = f"""Project Red attempted to fix a dbt error but was unable to resolve it after {attempts} attempts.
+            body = f"""SnowDuckAI attempted to fix a dbt error but was unable to resolve it after {attempts} attempts.
 
 Manual intervention is required.
 
@@ -150,7 +150,7 @@ Last Sandbox Error:
 Please investigate and fix the issue manually.
 
 ---
-Project Red — AI-powered dbt error resolution
+SnowDuckAI — AI-powered dbt error resolution
 """
 
             msg = MIMEMultipart()
@@ -190,7 +190,7 @@ class SlackNotifier(Notifier):
         """Send success Slack notification."""
         try:
             payload = {
-                "text": f"✅ *Project Red: PR Opened*",
+                "text": f"✅ *SnowDuckAI: PR Opened*",
                 "blocks": [
                     {
                         "type": "header",
@@ -203,7 +203,7 @@ class SlackNotifier(Notifier):
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"Project Red has successfully fixed a dbt error and opened a pull request."
+                            "text": f"SnowDuckAI has successfully fixed a dbt error and opened a pull request."
                         }
                     },
                     {
@@ -262,7 +262,7 @@ class SlackNotifier(Notifier):
             error_excerpt = error_log[-300:] if len(error_log) > 300 else error_log
 
             payload = {
-                "text": f"❌ *Project Red: Failed to Fix Error*",
+                "text": f"❌ *SnowDuckAI: Failed to Fix Error*",
                 "blocks": [
                     {
                         "type": "header",
@@ -275,7 +275,7 @@ class SlackNotifier(Notifier):
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"Project Red attempted to fix a dbt error but failed after *{attempts} attempts*. Manual intervention is required."
+                            "text": f"SnowDuckAI attempted to fix a dbt error but failed after *{attempts} attempts*. Manual intervention is required."
                         }
                     },
                     {
@@ -327,12 +327,12 @@ class TeamsNotifier(Notifier):
             payload = {
                 "@type": "MessageCard",
                 "@context": "https://schema.org/extensions",
-                "summary": "Project Red: PR Opened",
+                "summary": "SnowDuckAI: PR Opened",
                 "themeColor": "28a745",
                 "title": "✅ dbt Error Fixed",
                 "sections": [
                     {
-                        "activityTitle": "Project Red has successfully fixed a dbt error and opened a pull request.",
+                        "activityTitle": "SnowDuckAI has successfully fixed a dbt error and opened a pull request.",
                         "facts": [
                             {
                                 "name": "File",
@@ -384,12 +384,12 @@ class TeamsNotifier(Notifier):
             payload = {
                 "@type": "MessageCard",
                 "@context": "https://schema.org/extensions",
-                "summary": "Project Red: Failed to Fix Error",
+                "summary": "SnowDuckAI: Failed to Fix Error",
                 "themeColor": "dc3545",
                 "title": "❌ dbt Error Requires Manual Fix",
                 "sections": [
                     {
-                        "activityTitle": f"Project Red failed to fix a dbt error after {attempts} attempts. Manual intervention is required.",
+                        "activityTitle": f"SnowDuckAI failed to fix a dbt error after {attempts} attempts. Manual intervention is required.",
                         "facts": [
                             {
                                 "name": "Attempts",

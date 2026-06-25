@@ -1,4 +1,4 @@
-"""Project Red Agent — Main coordinator for dbt error diagnosis and fixing.
+"""SnowDuckAI Agent — Main coordinator for dbt error diagnosis and fixing.
 
 Full workflow:
 - Phase 1: Diagnose error with LLM tool-use loop
@@ -18,7 +18,7 @@ from git_handler import get_git_handler
 from notifier import get_notifier
 
 
-class ProjectRedAgent:
+class SnowDuckAIAgent:
     """Coordinates the dbt error diagnosis and fix workflow."""
 
     def __init__(self, config: Dict[str, Any], diagnose_only: bool = False):
@@ -544,11 +544,11 @@ def _expand_env_vars(config: Any) -> Any:
 
 
 def main():
-    """CLI entry point for Project Red."""
+    """CLI entry point for SnowDuckAI."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Project Red — AI agent for dbt error diagnosis and fixing"
+        description="SnowDuckAI — AI agent for dbt error diagnosis and fixing"
     )
     parser.add_argument(
         "--config",
@@ -567,12 +567,12 @@ def main():
 
     args = parser.parse_args()
 
-    print("🚀 Project Red — dbt Error Resolution Agent")
+    print("🚀 SnowDuckAI — dbt Error Resolution Agent")
     print("=" * 70)
 
     try:
         config = load_config(args.config)
-        agent = ProjectRedAgent(config, diagnose_only=args.diagnose_only)
+        agent = SnowDuckAIAgent(config, diagnose_only=args.diagnose_only)
 
         if args.diagnose_only:
             result = agent.diagnose(log_path=args.log)

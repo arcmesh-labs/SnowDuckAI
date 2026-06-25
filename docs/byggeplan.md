@@ -1,10 +1,10 @@
-# Byggeplan — Project Red
+# Byggeplan — SnowDuckAI
 
-## Hva er Project Red?
+## Hva er SnowDuckAI?
 
-Project Red er en AI-agent som kobler seg til din eksisterende dbt-pipeline, diagnostiserer feil, tester fix i et syntetisk miljø, og åpner en GitHub PR med verifisert løsning.
+SnowDuckAI er en AI-agent som kobler seg til din eksisterende dbt-pipeline, diagnostiserer feil, tester fix i et syntetisk miljø, og åpner en GitHub PR med verifisert løsning.
 
-**Project Red prosesserer ikke data. Den fikser kode.**
+**SnowDuckAI prosesserer ikke data. Den fikser kode.**
 
 dbt + DuckDB brukes utelukkende som sandbox for å verifisere at en fix faktisk fungerer — ikke for å prosessere produksjonsdata.
 
@@ -12,15 +12,15 @@ dbt + DuckDB brukes utelukkende som sandbox for å verifisere at en fix faktisk 
 
 ## To versjoner
 
-### Project Red (Open Source)
+### SnowDuckAI (Open Source)
 - For individuelle data engineers og små team
-- pip-installert lokalt eller i CI
+- pip-installert lokalt (`pip install snowduckai`)
 - Sandbox kjører på GitHub Actions hosted runner
 - LLM via Anthropic, OpenAI API, eller Ollama (lokale modeller)
 - Git via GitHub
 - Designet med tydelige abstraksjonslag — enterprise-varianter plugges inn uten å røre kjernelogikken
 
-### Project Red Enterprise
+### SnowDuckAI Enterprise
 - Self-hosted av bedriften
 - Identisk kodebase, annen konfig
 - Sandbox kjører på intern CI-runner (self-hosted GHA, Azure DevOps, Jenkins)
@@ -30,12 +30,33 @@ dbt + DuckDB brukes utelukkende som sandbox for å verifisere at en fix faktisk 
 
 ---
 
+## Brukerflyt
+
+```bash
+pip install snowduckai        # én gang
+sd init                       # i dbt-prosjektmappen — lager config + sandbox.yml
+# fyll inn config.yml med API-nøkler og GitHub token
+
+dbt run                       # bruker kjører dbt som normalt
+# feiler
+
+sd debug --log logs/dbt.log   # starter agent-loopen manuelt
+# → agent diagnostiserer, sandbox tester, PR åpnes
+```
+
+Fremtidig utvidelse:
+```bash
+sd watch                      # lytter til dbt.log og starter automatisk ved feil
+```
+
+---
+
 ## Arkitektur
 
 ```
 [Brukerens dbt pipeline feiler]
             ↓
-[project-red agent]  ← pip-installert
+[sd debug]  ← pip-installert, kjører lokalt
   leser dbt logs + manifest.json
             ↓
 [llm_client.py]           ← provider-pattern: Anthropic | OpenAI | Ollama
@@ -43,11 +64,12 @@ dbt + DuckDB brukes utelukkende som sandbox for å verifisere at en fix faktisk 
   foreslår fix
             ↓
 [sandbox_client.py]       ← provider-pattern: GHA | self-hosted (enterprise)
-  trigger CI runner
+  trigger GHA via GitHub API
             ↓
-[Runner]
+[GHA Runner]
   DuckDB + dbt installert
-  genererer syntetisk data fra schema
+  appliserer foreslått fix
+  kjører dbt run + dbt test
   tester fix — maks 5 forsøk
             ↓
   Grønn → git_handler.py åpner PR
@@ -56,20 +78,27 @@ dbt + DuckDB brukes utelukkende som sandbox for å verifisere at en fix faktisk 
 [git_handler.py]          ← provider-pattern: GitHub | GHE | GitLab (enterprise)
 ```
 
+Brukerens maskin gjør kun:
+- LLM-kall (Anthropic/OpenAI/Ollama)
+- GitHub API-kall (trigger sandbox, åpne PR)
+
+Alt det tunge kjører på GHA — ingen lokal DuckDB eller dbt nødvendig.
+
 ---
 
 ## Filstruktur
 
 ```
-project-red/
+snowduckai/
   agent.py              # koordinator — starter og styrer agent-loop
   llm_client.py         # LLM abstraksjon (Anthropic, OpenAI, Ollama)
   sandbox_client.py     # sandbox abstraksjon (GHA, self-hosted)
   git_handler.py        # git abstraksjon (GitHub, GHE, GitLab)
-  config.yml            # brukerens konfig
+  notifier.py           # varsling (email, Slack, Teams)
+  cli.py                # sd / snowduckai CLI (init, debug, watch)
   .github/
     workflows/
-      sandbox.yml       # GHA sandbox workflow (open source versjon)
+      sandbox.yml       # GHA sandbox workflow (kopieres til brukerens repo)
 ```
 
 ### Provider-pattern
@@ -86,11 +115,13 @@ class OpenAIClient(LLMClient): ...
 class OllamaClient(LLMClient): ...   # lokale modeller
 ```
 
-`sandbox_client.py` og `git_handler.py` følger samme prinsipp. Enterprise-varianter implementerer interfacet og konfigureres via `config.yml` — ingen endringer i `agent.py`.
+`sandbox_client.py` og `git_handler.py` følger samme prinsipp. Enterprise-varianter implementerer interfacet og konfigureres via `snowduckai.yml` — ingen endringer i `agent.py`.
 
 ---
 
 ## Konfigurasjon
+
+`sd init` lager `snowduckai.yml` med placeholder-verdier i dbt-prosjektmappen. Bruker fyller inn manuelt — se README.
 
 ### Open Source — Anthropic
 ```yaml
@@ -101,6 +132,8 @@ llm:
 
 sandbox:
   runner: github-actions
+  token: ${GITHUB_TOKEN}
+  repo: org/dbt-repo
 
 git:
   provider: github
@@ -108,7 +141,7 @@ git:
   repo: org/dbt-repo
 
 dbt:
-  project_path: ./dbt-project
+  project_path: .
 
 notify:
   channel: email
@@ -128,7 +161,7 @@ llm:
 llm:
   provider: ollama
   base_url: http://localhost:11434
-  model: llama3.1:8b   # eller qwen3:8b, osv.
+  model: llama3.1:8b
 ```
 
 ### Enterprise
@@ -150,14 +183,14 @@ git:
   repo: org/dbt-repo
 
 dbt:
-  project_path: ./dbt-project
+  project_path: .
 ```
 
 ---
 
 ## Byggefaser
 
-### Fase 1 — agent.py + llm_client.py
+### Fase 1 — agent.py + llm_client.py ✅
 
 **Mål:** Agenten leser en dbt-feilmelding og returnerer et fix-forslag.
 
@@ -176,52 +209,20 @@ Tools (read-only):
 - `read_file(path)` — les en fil fra dbt-prosjektet
 - `list_directory(path)` — list filer i en mappe
 
-`llm_client.py` instansieres basert på `config.yml`:
-```python
-def get_llm_client(config) -> LLMClient:
-    provider = config["llm"]["provider"]
-    if provider == "anthropic": return AnthropicClient(config)
-    if provider == "openai":    return OpenAIClient(config)
-    if provider == "ollama":    return OllamaClient(config)
-    raise ValueError(f"Ukjent LLM provider: {provider}")
-```
-
-**Verifisering:** Introduser en kjent dbt-feil. Bekreft at agenten returnerer et fornuftig fix-forslag — test med minst én sky-provider og Ollama.
-
 ---
 
-### Fase 2 — sandbox_client.py
+### Fase 2 — sandbox_client.py ✅
 
-**Mål:** Fix testes i isolert DuckDB + dbt miljø.
-
-**Open Source:** `sandbox_client.py` trigger GHA workflow via GitHub API.
-
-`sandbox.yml` (GHA workflow) gjør:
-1. Installer dbt-core + dbt-duckdb
-2. Generer syntetisk data basert på schema fra manifest
-3. Appliser foreslått fix
-4. Kjør `dbt run` + `dbt test`
-5. Returner resultat til agenten
-
-`sandbox_client.py` følger provider-pattern:
-```python
-def get_sandbox_client(config) -> SandboxClient:
-    runner = config["sandbox"]["runner"]
-    if runner == "github-actions": return GHAClient(config)
-    if runner == "self-hosted":    return SelfHostedClient(config)  # enterprise stub
-    raise ValueError(f"Ukjent sandbox runner: {runner}")
-```
+**Mål:** Fix testes i isolert DuckDB + dbt miljø på GHA.
 
 Sandbox-loop (maks 5 forsøk):
 - Grønn → gå videre til fase 3
 - Rød → send ny feilmelding tilbake til agenten, forsøk N+1
 - 5 røde → gå til varsling uten PR
 
-**Verifisering:** Introduser en kjent dbt-feil. Bekreft at sandboxen reproduserer feilen og at agenten itererer mot grønn.
-
 ---
 
-### Fase 3 — git_handler.py
+### Fase 3 — git_handler.py ✅
 
 **Mål:** Agenten committer verifisert fix og åpner PR.
 
@@ -229,74 +230,63 @@ Steg:
 1. Lag branch: `fix/dbt-{timestamp}`
 2. Skriv fix
 3. Push branch
-4. Åpne PR med beskrivelse:
-   - Hva feilet
-   - Hva agenten undersøkte
-   - Hvilke fixes ble forsøkt
-   - Hva som til slutt fungerte
-
-`git_handler.py` følger provider-pattern:
-```python
-def get_git_handler(config) -> GitHandler:
-    provider = config["git"]["provider"]
-    if provider == "github":            return GitHubHandler(config)
-    if provider == "github-enterprise": return GHEHandler(config)    # enterprise stub
-    if provider == "gitlab":            return GitLabHandler(config)  # enterprise stub
-    raise ValueError(f"Ukjent git provider: {provider}")
-```
-
-**Verifisering:** Bekreft at PR er åpen med korrekt beskrivelse etter grønn sandbox.
+4. Åpne PR med beskrivelse av hva som feilet, hva som ble undersøkt, og hvilken fix som fungerte
 
 ---
 
-### Fase 4 — Varsling
+### Fase 4 — Varsling ✅
 
 **Mål:** Agenten varsler utvikler uansett utfall.
 
 - **Grønn:** "PR åpnet: fix/dbt-{timestamp}"
 - **5 røde:** "Agenten klarte ikke å fikse feilen. Manuell handling kreves."
 
-Kanal konfigureres i `config.yml`:
-```yaml
-notify:
-  channel: email        # eller slack, teams
-  to: dev@bedrift.no
+---
+
+### Fase 5 — Integrasjonstest ✅
+
+Ende-til-ende grønn: agent diagnostiserer → GHA sandbox → PR åpnet.
+
+---
+
+### Fase 6 — CLI (sd / snowduckai)
+
+**Mål:** Brukervennlig CLI som pakker agent-loopen.
+
+Kommandoer:
+```bash
+sd init       # lager snowduckai.yml + .github/workflows/sandbox.yml i dbt-prosjektet
+sd debug      # starter agent-loopen: sd debug --log logs/dbt.log
+sd watch      # (kommer senere) lytter til dbt.log, starter ved feil
 ```
 
----
+`sd` og `snowduckai` er aliaser for samme CLI.
 
-### Fase 5 — Integrasjonstest
-
-**Mål:** Ende-til-ende test av hele flyten.
-
-Scenario:
-1. Fungerende dbt-pipeline
-2. Introduser kjent feil manuelt
-3. Kjør `project-red watch --repo ./dbt-project`
-4. Bekreft PR åpnes med korrekt fix
-
-Test med minst to LLM-providers (f.eks. Anthropic + Ollama).
+`sd init` lager kun filer — ingen interaktiv prompt. Bruker fyller inn config manuelt per README.
 
 ---
 
-### Fase 6 — Distribusjon
+### Fase 7 — Distribusjon (PyPI)
 
 ```bash
-pip install project-red
-# + kopier .github/workflows/sandbox.yml inn i dbt-repoet
+pip install snowduckai
 ```
 
-PyPI-publisering gjøres etter vellykket integrasjonstest.
+Krav før publisering:
+- CLI fungerer end-to-end
+- README er ferdig
+- PyPI-pakkenavn `snowduckai` er tilgjengelig
 
 ---
 
 ## Oppsummering
 
-| Fase | Hva | Output |
+| Fase | Hva | Status |
 |------|-----|--------|
-| 1 | agent.py + llm_client.py | Fix-forslag fra LLM |
-| 2 | sandbox_client.py | Verifisert fix |
-| 3 | git_handler.py | PR åpnet |
-| 4 | Varsling | Utvikler informert |
-| 5 | Integrasjonstest | Ende-til-ende grønn |
-| 6 | Distribusjon | pip install project-red |
+| 1 | agent.py + llm_client.py | ✅ |
+| 2 | sandbox_client.py + GHA | ✅ |
+| 3 | git_handler.py | ✅ |
+| 4 | Varsling | ✅ |
+| 5 | Integrasjonstest | ✅ |
+| 6 | CLI (sd init, sd debug, sd watch) | — |
+| 7 | PyPI (pip install snowduckai) | — |
