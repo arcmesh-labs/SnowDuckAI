@@ -1,0 +1,3 @@
+[console_scripts]
+sd = snowduckai.cli:main
+snowduckai = snowduckai.cli:main

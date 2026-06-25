@@ -12,10 +12,10 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from llm_client import get_llm_client
-from sandbox_client import get_sandbox_client, test_fix_with_retry
-from git_handler import get_git_handler
-from notifier import get_notifier
+from snowduckai.llm_client import get_llm_client
+from snowduckai.sandbox_client import get_sandbox_client, test_fix_with_retry
+from snowduckai.git_handler import get_git_handler
+from snowduckai.notifier import get_notifier
 
 
 class SnowDuckAIAgent:
