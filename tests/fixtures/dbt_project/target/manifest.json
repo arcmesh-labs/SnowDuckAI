@@ -1,0 +1,110 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11/manifest.json",
+    "dbt_version": "1.7.0",
+    "generated_at": "2026-06-25T08:00:00.000000Z",
+    "invocation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "env": {}
+  },
+  "nodes": {
+    "model.project_red_test.stg_customers": {
+      "unique_id": "model.project_red_test.stg_customers",
+      "name": "stg_customers",
+      "resource_type": "model",
+      "path": "staging/stg_customers.sql",
+      "original_file_path": "models/staging/stg_customers.sql",
+      "config": { "materialized": "view" },
+      "depends_on": {
+        "nodes": ["seed.project_red_test.raw_customers"]
+      },
+      "columns": {
+        "customer_id":   { "name": "customer_id",   "data_type": "integer" },
+        "customer_name": { "name": "customer_name", "data_type": "varchar" },
+        "email":         { "name": "email",         "data_type": "varchar" },
+        "created_date":  { "name": "created_date",  "data_type": "date" }
+      },
+      "compiled_code": "SELECT customer_id, customer_name, email, created_at::DATE AS created_date FROM raw_customers"
+    },
+    "model.project_red_test.stg_orders": {
+      "unique_id": "model.project_red_test.stg_orders",
+      "name": "stg_orders",
+      "resource_type": "model",
+      "path": "staging/stg_orders.sql",
+      "original_file_path": "models/staging/stg_orders.sql",
+      "config": { "materialized": "view" },
+      "depends_on": {
+        "nodes": ["seed.project_red_test.raw_orders"]
+      },
+      "columns": {
+        "order_id":    { "name": "order_id",    "data_type": "integer" },
+        "customer_id": { "name": "customer_id", "data_type": "integer" },
+        "amount":      { "name": "amount",      "data_type": "decimal" },
+        "status":      { "name": "status",      "data_type": "varchar" },
+        "order_date":  { "name": "order_date",  "data_type": "date" }
+      },
+      "compiled_code": "SELECT order_id, customer_id, amount::DECIMAL(10,2) AS amount, status, ordered_at::DATE AS order_date FROM raw_orders"
+    },
+    "model.project_red_test.orders_summary": {
+      "unique_id": "model.project_red_test.orders_summary",
+      "name": "orders_summary",
+      "resource_type": "model",
+      "path": "marts/orders_summary.sql",
+      "original_file_path": "models/marts/orders_summary.sql",
+      "config": { "materialized": "table" },
+      "depends_on": {
+        "nodes": [
+          "model.project_red_test.stg_customers",
+          "model.project_red_test.stg_orders"
+        ]
+      },
+      "columns": {},
+      "compiled_code": "SELECT c.customer_id, c.customer_name, c.customer_segment, COUNT(o.order_id) AS order_count, SUM(o.amount) AS total_amount, MAX(o.order_date) AS last_order_date FROM dev.stg_customers c LEFT JOIN dev.stg_orders o ON c.customer_id = o.customer_id GROUP BY 1, 2, 3"
+    },
+    "seed.project_red_test.raw_customers": {
+      "unique_id": "seed.project_red_test.raw_customers",
+      "name": "raw_customers",
+      "resource_type": "seed",
+      "path": "raw_customers.csv",
+      "original_file_path": "seeds/raw_customers.csv",
+      "depends_on": { "nodes": [] },
+      "columns": {
+        "customer_id":   { "name": "customer_id" },
+        "customer_name": { "name": "customer_name" },
+        "email":         { "name": "email" },
+        "created_at":    { "name": "created_at" }
+      }
+    },
+    "seed.project_red_test.raw_orders": {
+      "unique_id": "seed.project_red_test.raw_orders",
+      "name": "raw_orders",
+      "resource_type": "seed",
+      "path": "raw_orders.csv",
+      "original_file_path": "seeds/raw_orders.csv",
+      "depends_on": { "nodes": [] },
+      "columns": {
+        "order_id":    { "name": "order_id" },
+        "customer_id": { "name": "customer_id" },
+        "amount":      { "name": "amount" },
+        "status":      { "name": "status" },
+        "ordered_at":  { "name": "ordered_at" }
+      }
+    }
+  },
+  "sources": {},
+  "exposures": {},
+  "metrics": {},
+  "parent_map": {
+    "model.project_red_test.stg_customers": ["seed.project_red_test.raw_customers"],
+    "model.project_red_test.stg_orders":    ["seed.project_red_test.raw_orders"],
+    "model.project_red_test.orders_summary": [
+      "model.project_red_test.stg_customers",
+      "model.project_red_test.stg_orders"
+    ]
+  },
+  "child_map": {
+    "seed.project_red_test.raw_customers": ["model.project_red_test.stg_customers"],
+    "seed.project_red_test.raw_orders":    ["model.project_red_test.stg_orders"],
+    "model.project_red_test.stg_customers": ["model.project_red_test.orders_summary"],
+    "model.project_red_test.stg_orders":    ["model.project_red_test.orders_summary"]
+  }
+}

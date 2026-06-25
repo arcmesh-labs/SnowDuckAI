@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "project-red-v2": {
+      "args": [
+        "/home/alex/project-red-v2/.mcp/server.py"
+      ],
+      "command": "python"
+    }
+  },
+  "version": "1.0"
+}

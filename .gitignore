@@ -1,0 +1,5 @@
+config.yml
+*.duckdb
+__pycache__/
+*.pyc
+.env

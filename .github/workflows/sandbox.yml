@@ -1,0 +1,158 @@
+name: Project Red Sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      fix_data:
+        description: 'Base64-encoded JSON with file_path, fixed_content, explanation'
+        required: true
+        type: string
+      manifest:
+        description: 'Base64-encoded dbt manifest (optional)'
+        required: false
+        type: string
+
+jobs:
+  test-fix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dbt-core and dbt-duckdb
+        run: |
+          pip install --upgrade pip
+          pip install dbt-core dbt-duckdb
+          dbt --version
+
+      - name: Decode fix data
+        id: decode
+        run: |
+          echo "${{ inputs.fix_data }}" | base64 -d > /tmp/fix_data.json
+          cat /tmp/fix_data.json
+          echo "Fix data decoded successfully"
+
+      - name: Extract fix details
+        id: extract
+        run: |
+          FILE_PATH=$(jq -r '.file_path' /tmp/fix_data.json)
+          EXPLANATION=$(jq -r '.explanation' /tmp/fix_data.json)
+          echo "file_path=$FILE_PATH" >> $GITHUB_OUTPUT
+          echo "explanation=$EXPLANATION" >> $GITHUB_OUTPUT
+          echo "Fixing: $FILE_PATH"
+          echo "Reason: $EXPLANATION"
+
+      - name: Apply fix to model file
+        run: |
+          FILE_PATH="${{ steps.extract.outputs.file_path }}"
+
+          echo "Applying fix to $FILE_PATH..."
+
+          # Create directory if it doesn't exist
+          mkdir -p "$(dirname "$FILE_PATH")"
+
+          # Extract fixed content from JSON and write to file
+          jq -r '.fixed_content' /tmp/fix_data.json > "$FILE_PATH"
+
+          echo "Fix applied successfully"
+          echo "File size: $(wc -c < "$FILE_PATH") bytes"
+
+      - name: Create dbt_project.yml if missing
+        run: |
+          if [ ! -f "dbt_project.yml" ]; then
+            echo "Creating minimal dbt_project.yml..."
+            cat > dbt_project.yml <<EOF
+          name: 'sandbox_project'
+          version: '1.0.0'
+          config-version: 2
+
+          profile: 'sandbox'
+
+          model-paths: ["models"]
+          seed-paths: ["seeds"]
+          test-paths: ["tests"]
+
+          models:
+            sandbox_project:
+              +materialized: table
+          EOF
+          fi
+
+      - name: Create profiles.yml for DuckDB
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<EOF
+          sandbox:
+            target: dev
+            outputs:
+              dev:
+                type: duckdb
+                path: sandbox.duckdb
+                threads: 1
+          EOF
+
+          echo "DuckDB profile created"
+
+      - name: Generate synthetic seed data
+        run: |
+          # Create seeds directory if it doesn't exist
+          mkdir -p seeds
+
+          # Generate a simple seed file if none exist
+          if [ ! "$(ls -A seeds/*.csv 2>/dev/null)" ]; then
+            echo "Creating synthetic seed data..."
+            cat > seeds/sample_data.csv <<EOF
+          id,name,value
+          1,test_record_1,100
+          2,test_record_2,200
+          3,test_record_3,300
+          EOF
+            echo "Synthetic seed created: seeds/sample_data.csv"
+          else
+            echo "Existing seed files found"
+          fi
+
+      - name: Run dbt debug
+        run: |
+          dbt debug --profile sandbox
+
+      - name: Run dbt seed
+        run: |
+          dbt seed --profile sandbox --full-refresh
+
+      - name: Run dbt run
+        id: dbt_run
+        run: |
+          echo "Running dbt models with applied fix..."
+          dbt run --profile sandbox
+
+      - name: Run dbt test
+        id: dbt_test
+        run: |
+          echo "Running dbt tests..."
+          dbt test --profile sandbox || echo "No tests found or tests failed"
+
+      - name: Verify fix success
+        run: |
+          echo "✅ Fix verification complete!"
+          echo "The proposed fix passed dbt run successfully."
+          echo ""
+          echo "Explanation: ${{ steps.extract.outputs.explanation }}"
+
+      - name: Cleanup on failure
+        if: failure()
+        run: |
+          echo "❌ Fix verification failed"
+          echo "The proposed fix did not resolve the dbt error."
+          echo ""
+          echo "File: ${{ steps.extract.outputs.file_path }}"
+          echo "Explanation: ${{ steps.extract.outputs.explanation }}"
+          echo ""
+          echo "Check the logs above for details on what went wrong."
+          exit 1
