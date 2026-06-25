@@ -53,7 +53,7 @@ class SnowDuckAIAgent:
         Returns:
             List of tool definitions in Anthropic format
         """
-        return [
+        tools = [
             {
                 "name": "read_file",
                 "description": "Read the contents of a file from the dbt project. Use this to examine SQL models, schema files, or configuration files.",
@@ -81,8 +81,14 @@ class SnowDuckAIAgent:
                     },
                     "required": ["path"]
                 }
-            },
-            {
+            }
+        ]
+
+        # Add propose_fix tool for providers that support tool calling (anthropic, openai)
+        # Ollama uses text-based responses instead
+        provider = self.config.get("llm", {}).get("provider", "")
+        if provider in ["anthropic", "openai"]:
+            tools.append({
                 "name": "propose_fix",
                 "description": "Propose a fix for the dbt error. This ends the diagnostic loop and submits your proposed solution.",
                 "input_schema": {
@@ -107,8 +113,9 @@ class SnowDuckAIAgent:
                     },
                     "required": ["file_path", "original_content", "fixed_content", "explanation"]
                 }
-            }
-        ]
+            })
+
+        return tools
 
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
         """Execute a tool call and return the result.
@@ -195,6 +202,79 @@ class SnowDuckAIAgent:
         self.proposed_fix = fix_data
         return "Fix proposal recorded. Diagnostic loop complete."
 
+    def _parse_fix_from_text(self, text: str) -> Optional[Dict[str, Any]]:
+        """Parse fix data from LLM text response.
+
+        Tries JSON parsing first, then falls back to regex extraction.
+
+        Args:
+            text: Text response from LLM
+
+        Returns:
+            Dict with file_path, original_content, fixed_content, explanation or None
+        """
+        import re
+
+        # Try JSON parsing first - try the entire stripped text
+        try:
+            stripped_text = text.strip()
+            fix_data = json.loads(stripped_text)
+            if all(k in fix_data for k in ["file_path", "fixed_content"]):
+                # Fill in defaults if missing
+                if "original_content" not in fix_data:
+                    fix_data["original_content"] = ""
+                if "explanation" not in fix_data:
+                    fix_data["explanation"] = "Fix extracted from LLM response"
+                return fix_data
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: Try to find JSON object embedded in text with regex
+        try:
+            json_match = re.search(r'\{[^{}]*"file_path"[^{}]*\}', text, re.DOTALL)
+            if json_match:
+                fix_data = json.loads(json_match.group(0))
+                if all(k in fix_data for k in ["file_path", "fixed_content"]):
+                    # Fill in defaults if missing
+                    if "original_content" not in fix_data:
+                        fix_data["original_content"] = ""
+                    if "explanation" not in fix_data:
+                        fix_data["explanation"] = "Fix extracted from LLM response"
+                    return fix_data
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: try to extract from markdown-style response
+        # Look for file path
+        file_path_match = re.search(r'(?:file_path|File|Path):\s*["`]?([^"`\n]+\.sql)["`]?', text, re.IGNORECASE)
+        if not file_path_match:
+            # Try to find any .sql file mentioned
+            file_path_match = re.search(r'([a-zA-Z0-9_/]+\.sql)', text)
+
+        if file_path_match:
+            file_path = file_path_match.group(1)
+
+            # Look for SQL code blocks
+            sql_blocks = re.findall(r'```sql\s*\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
+            if not sql_blocks:
+                sql_blocks = re.findall(r'```\s*\n(.*?)\n```', text, re.DOTALL)
+
+            if sql_blocks:
+                fixed_content = sql_blocks[-1].strip()  # Take the last code block as the fix
+
+                # Try to extract explanation
+                explanation_match = re.search(r'(?:explanation|summary|fix):\s*(.+?)(?:\n\n|\n```|$)', text, re.IGNORECASE | re.DOTALL)
+                explanation = explanation_match.group(1).strip() if explanation_match else "Fix extracted from markdown response"
+
+                return {
+                    "file_path": file_path,
+                    "original_content": "",
+                    "fixed_content": fixed_content,
+                    "explanation": explanation
+                }
+
+        return None
+
     def _load_dbt_error_log(self, log_path: Optional[str] = None) -> str:
         """Load the dbt error log.
 
@@ -243,7 +323,7 @@ class SnowDuckAIAgent:
 Your task:
 1. Analyze the error log below
 2. Use the available tools to explore the dbt project and understand the issue
-3. Once you understand the problem, propose a fix using the propose_fix tool
+3. Once you understand the problem, respond with the fix as JSON
 
 dbt Error Log:
 ```
@@ -263,9 +343,18 @@ dbt Manifest (graph and schema information):
 Available tools:
 - read_file: Read any file from the dbt project
 - list_directory: List contents of any directory
-- propose_fix: Submit your fix proposal (ends the diagnostic loop)
 
 Start by analyzing the error and determining what files you need to examine.
+
+When you have identified the fix, respond with a JSON object in this exact format:
+{{
+  "file_path": "path/to/file.sql",
+  "original_content": "the current file content",
+  "fixed_content": "the corrected file content",
+  "explanation": "brief explanation of what was wrong and how you fixed it"
+}}
+
+IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any other text before or after the JSON.
 """
         return prompt
 
@@ -294,13 +383,21 @@ Start by analyzing the error and determining what files you need to examine.
         self.proposed_fix = None
         tools = self._get_tools()
 
+        # System prompt to reinforce JSON response format
+        system_prompt = (
+            "You are a dbt debugging agent. Your job is to diagnose errors and propose fixes. "
+            "When you have identified the fix, respond with a JSON object containing file_path, original_content, fixed_content, and explanation. "
+            "Return ONLY the JSON object, with no additional text or markdown formatting."
+        )
+
         for iteration in range(self.max_iterations):
             print(f"  Iteration {iteration + 1}/{self.max_iterations}...")
 
             response = self.llm_client.complete(
                 messages=self.conversation_history,
                 tools=tools,
-                max_tokens=4096
+                max_tokens=4096,
+                system=system_prompt
             )
 
             assistant_content = []
@@ -361,6 +458,20 @@ Start by analyzing the error and determining what files you need to examine.
                 })
 
                 if response.get("stop_reason") in ["end_turn", "stop"]:
+                    # Try to parse fix from text response
+                    text_content = response.get("content", "")
+                    if text_content:
+                        parsed_fix = self._parse_fix_from_text(text_content)
+                        if parsed_fix:
+                            print("✅ Fix parsed from text response!")
+                            return {
+                                "success": True,
+                                "fix": parsed_fix,
+                                "iterations": iteration + 1,
+                                "manifest": manifest
+                            }
+
+                    # Check if fix was proposed via tool (for backward compatibility)
                     if self.proposed_fix:
                         return {
                             "success": True,

@@ -24,7 +24,8 @@ class LLMClient(ABC):
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        system: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send completion request to LLM.
 
@@ -32,6 +33,7 @@ class LLMClient(ABC):
             messages: List of message dicts with 'role' and 'content'
             tools: Optional list of tool definitions
             max_tokens: Maximum tokens to generate
+            system: Optional system prompt
 
         Returns:
             Dict with 'content' (text response) and optional 'tool_calls'
@@ -65,7 +67,8 @@ class AnthropicClient(LLMClient):
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        system: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send completion request to Anthropic API."""
 
@@ -74,6 +77,9 @@ class AnthropicClient(LLMClient):
             "max_tokens": max_tokens,
             "messages": messages
         }
+
+        if system:
+            kwargs["system"] = system
 
         if tools:
             kwargs["tools"] = tools
@@ -126,14 +132,20 @@ class OpenAIClient(LLMClient):
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        system: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send completion request to OpenAI API."""
+
+        # Prepend system message if provided
+        final_messages = messages
+        if system:
+            final_messages = [{"role": "system", "content": system}] + messages
 
         kwargs = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": messages
+            "messages": final_messages
         }
 
         if tools:
@@ -173,20 +185,27 @@ class OpenAIClient(LLMClient):
 
 
 class OllamaClient(LLMClient):
-    """Ollama (local models) LLM client."""
+    """Ollama (local models) LLM client using OpenAI-compatible API."""
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
 
         try:
-            import requests
-            self.requests = requests
+            import openai
         except ImportError:
             raise ImportError(
-                "requests package not installed. Install with: pip install requests"
+                "openai package not installed. Install with: pip install openai"
             )
 
-        self.base_url = self.llm_config.get("base_url", "http://localhost:11434")
+        base_url = self.llm_config.get("base_url", "http://localhost:11434")
+        # Ensure base_url ends with /v1 for OpenAI-compatible endpoint
+        self.base_url = base_url.rstrip("/") + "/v1"
+
+        # Ollama's OpenAI-compatible endpoint requires a placeholder API key
+        self.client = openai.OpenAI(
+            base_url=self.base_url,
+            api_key="ollama"
+        )
 
         if not self.model:
             self.model = "llama3.1:8b"
@@ -195,45 +214,55 @@ class OllamaClient(LLMClient):
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        system: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Send completion request to Ollama API."""
+        """Send completion request to Ollama via OpenAI-compatible API."""
 
-        payload = {
+        # Prepend system message if provided
+        final_messages = messages
+        if system:
+            final_messages = [{"role": "system", "content": system}] + messages
+
+        kwargs = {
             "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "num_predict": max_tokens
-            }
+            "max_tokens": max_tokens,
+            "messages": final_messages
         }
 
         if tools:
-            payload["tools"] = tools
+            # Convert Anthropic tool format to OpenAI format
+            formatted_tools = []
+            for tool in tools:
+                formatted_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("input_schema", {})
+                    }
+                })
+            kwargs["tools"] = formatted_tools
 
-        response = self.requests.post(
-            f"{self.base_url}/api/chat",
-            json=payload
-        )
-        response.raise_for_status()
+        response = self.client.chat.completions.create(**kwargs)
 
-        data = response.json()
-        message = data.get("message", {})
+        message = response.choices[0].message
 
         result = {
-            "content": message.get("content", ""),
+            "content": message.content or "",
             "tool_calls": []
         }
 
-        if message.get("tool_calls"):
-            for tool_call in message["tool_calls"]:
+        if message.tool_calls:
+            import json
+            for tool_call in message.tool_calls:
                 result["tool_calls"].append({
-                    "id": tool_call.get("id", ""),
-                    "name": tool_call.get("function", {}).get("name", ""),
-                    "input": tool_call.get("function", {}).get("arguments", {})
+                    "id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "input": json.loads(tool_call.function.arguments)
                 })
 
-        result["stop_reason"] = data.get("done_reason", "stop")
+        result["stop_reason"] = response.choices[0].finish_reason
 
         return result
 

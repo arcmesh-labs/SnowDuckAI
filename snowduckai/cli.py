@@ -8,6 +8,7 @@ Commands:
 import argparse
 import shutil
 import sys
+import time
 from pathlib import Path
 
 
@@ -66,6 +67,7 @@ git:
 
 dbt:
   project_path: .  # path to dbt_project.yml (current dir by default)
+  log_path: logs/dbt.log  # path to dbt.log file
 
 notify:
   channel: email  # email, slack, or teams
@@ -85,7 +87,7 @@ notify:
     print("\nNext steps:")
     print("1. Edit snowduckai.yml and fill in your API keys and GitHub repo")
     print("2. Set environment variables: ANTHROPIC_API_KEY, GITHUB_TOKEN")
-    print("3. Run: sd debug --log logs/dbt.log")
+    print("3. Run: sd debug")
     print("=" * 70)
 
 
@@ -98,8 +100,7 @@ def cmd_debug(args):
     from snowduckai.agent import load_config, SnowDuckAIAgent
 
     config_path = args.config
-    log_path = args.log
-    diagnose_only = args.diagnose_only
+    diagnose_only = args.diagnose
 
     # Load config
     try:
@@ -110,6 +111,13 @@ def cmd_debug(args):
         sys.exit(1)
     except Exception as e:
         print(f"❌ Error loading config: {e}")
+        sys.exit(1)
+
+    # Read log path from config
+    log_path = config.get("dbt", {}).get("log_path")
+    if not log_path:
+        print(f"❌ Error: dbt.log_path not specified in {config_path}")
+        print(f"\nAdd 'log_path: logs/dbt.log' under the 'dbt:' section in your config")
         sys.exit(1)
 
     # Run the agent
@@ -132,7 +140,7 @@ def cmd_debug(args):
                 print(f"   Explanation: {fix['explanation']}")
                 print(f"\n   Original content length: {len(fix['original_content'])} chars")
                 print(f"   Fixed content length: {len(fix['fixed_content'])} chars")
-                print(f"\n   Next step: Run without --diagnose-only to test in sandbox")
+                print(f"\n   Next step: Run without --diagnose to test in sandbox")
             else:
                 print("❌ DIAGNOSTIC FAILED")
                 print(f"   Error: {result['error']}")
@@ -167,6 +175,147 @@ def cmd_debug(args):
         sys.exit(1)
 
 
+def cmd_watch(args):
+    """Watch dbt.log and trigger agent automatically on error.
+
+    Args:
+        args: Parsed command-line arguments
+    """
+    from snowduckai.agent import load_config, SnowDuckAIAgent
+
+    config_path = args.config
+
+    # Load config
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        print(f"❌ Error: Config file not found: {config_path}")
+        print(f"\nRun 'sd init' first to create snowduckai.yml")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error loading config: {e}")
+        sys.exit(1)
+
+    # Read log path from config
+    log_path_str = config.get("dbt", {}).get("log_path")
+    if not log_path_str:
+        print(f"❌ Error: dbt.log_path not specified in {config_path}")
+        print(f"\nAdd 'log_path: logs/dbt.log' under the 'dbt:' section in your config")
+        sys.exit(1)
+
+    log_path = Path(log_path_str)
+
+    print("👀 SnowDuckAI — Watching for dbt errors")
+    print("=" * 70)
+    print(f"   Monitoring: {log_path}")
+    print(f"   Config: {config_path}")
+    print(f"   Press Ctrl+C to stop")
+    print("=" * 70)
+
+    # Wait for log file to exist
+    while not log_path.exists():
+        print(f"⏳ Waiting for {log_path} to be created...")
+        time.sleep(2)
+
+    print(f"✅ Log file found, watching for errors...\n")
+
+    # Track file position and last error time
+    last_position = log_path.stat().st_size
+    last_error_time = 0
+    cooldown_seconds = 60  # Don't trigger again within 60 seconds
+
+    try:
+        while True:
+            time.sleep(1)
+
+            # Check if file has grown
+            current_size = log_path.stat().st_size
+            if current_size < last_position:
+                # File was truncated/rotated
+                last_position = 0
+
+            if current_size > last_position:
+                # Read new content
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(last_position)
+                    new_content = f.read()
+                    last_position = current_size
+
+                # Check for dbt error patterns
+                if _detect_dbt_error(new_content):
+                    current_time = time.time()
+                    if current_time - last_error_time < cooldown_seconds:
+                        print(f"⏸️  Error detected but in cooldown period ({int(current_time - last_error_time)}s ago)")
+                        continue
+
+                    print("\n" + "=" * 70)
+                    print("🚨 DBT ERROR DETECTED")
+                    print("=" * 70)
+                    print(f"   Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"   Triggering SnowDuckAI agent...\n")
+
+                    last_error_time = current_time
+
+                    # Trigger the agent workflow
+                    try:
+                        agent = SnowDuckAIAgent(config, diagnose_only=False)
+                        result = agent.run_full_workflow(log_path=log_path_str)
+
+                        print("\n" + "=" * 70)
+                        print("WORKFLOW RESULT")
+                        print("=" * 70)
+
+                        if result["success"]:
+                            print("✅ SUCCESS")
+                            print(f"   Pull Request: {result['pr_url']}")
+                            print(f"   Branch: {result['branch']}")
+                            print(f"   The fix has been verified and is ready for review!")
+                        else:
+                            print("❌ FAILED")
+                            print(f"   Phase: {result['phase']}")
+                            print(f"   Error: {result['error']}")
+
+                    except Exception as e:
+                        print(f"\n❌ Agent error: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                    print("\n" + "=" * 70)
+                    print(f"👀 Resuming watch on {log_path}...")
+                    print("=" * 70 + "\n")
+
+    except KeyboardInterrupt:
+        print("\n\n👋 Stopping watch mode")
+        sys.exit(0)
+
+
+def _detect_dbt_error(content: str) -> bool:
+    """Detect if content contains a dbt error.
+
+    Args:
+        content: Log content to check
+
+    Returns:
+        True if error detected, False otherwise
+    """
+    error_patterns = [
+        "Compilation Error",
+        "Runtime Error",
+        "Database Error",
+        "Unhandled error",
+        "ERROR =",
+        "Completed with 1 error",
+        "Completed with errors",
+    ]
+
+    content_lower = content.lower()
+    for pattern in error_patterns:
+        if pattern.lower() in content_lower:
+            return True
+
+    return False
+
+
 def main():
     """Main CLI entry point for SnowDuckAI."""
     parser = argparse.ArgumentParser(
@@ -175,9 +324,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  sd init                              Initialize in current dbt project
-  sd debug --log logs/dbt.log          Run full diagnostic workflow
-  sd debug --log logs/dbt.log --diagnose-only   Diagnose only (no sandbox/PR)
+  sd init                  Initialize in current dbt project
+  sd debug                 Run full diagnostic workflow
+  sd debug --diagnose      Diagnose only (no sandbox/PR)
+  sd watch                 Watch dbt.log and trigger automatically on error
 
 Environment variables:
   ANTHROPIC_API_KEY    Anthropic API key (if using Claude)
@@ -207,14 +357,20 @@ Environment variables:
         help="Path to config file (default: snowduckai.yml)"
     )
     debug_parser.add_argument(
-        "--log",
-        required=True,
-        help="Path to dbt.log file with error"
-    )
-    debug_parser.add_argument(
-        "--diagnose-only",
+        "--diagnose",
         action="store_true",
         help="Run diagnostic only (skip sandbox, PR, and notification)"
+    )
+
+    # sd watch
+    watch_parser = subparsers.add_parser(
+        "watch",
+        help="Watch dbt.log and trigger agent automatically on error"
+    )
+    watch_parser.add_argument(
+        "--config",
+        default="snowduckai.yml",
+        help="Path to config file (default: snowduckai.yml)"
     )
 
     args = parser.parse_args()
@@ -223,6 +379,8 @@ Environment variables:
         cmd_init()
     elif args.command == "debug":
         cmd_debug(args)
+    elif args.command == "watch":
+        cmd_watch(args)
     else:
         parser.print_help()
         sys.exit(1)

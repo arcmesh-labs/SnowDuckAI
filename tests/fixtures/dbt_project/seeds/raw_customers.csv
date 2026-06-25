@@ -1,6 +1,0 @@
-customer_id,customer_name,email,created_at
-1,Alice Andersen,alice@example.com,2024-01-05
-2,Bob Bakke,bob@example.com,2024-01-12
-3,Camilla Christensen,camilla@example.com,2024-02-03
-4,David Dahl,david@example.com,2024-02-20
-5,Eva Eriksen,eva@example.com,2024-03-08

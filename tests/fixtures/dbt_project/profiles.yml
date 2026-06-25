@@ -1,7 +1,0 @@
-project_red_test:
-  target: dev
-  outputs:
-    dev:
-      type: duckdb
-      path: /tmp/project_red_test.duckdb
-      threads: 4
