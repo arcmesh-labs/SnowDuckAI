@@ -125,6 +125,19 @@ The following environment variables are used:
         doc_file.write_text(doc_template)
         print(f"✅ Created {doc_file}")
 
+    # Create logs/ directory and dbt.log file in dbt.project_path
+    # Default project_path is current directory (.)
+    dbt_project_path = current_dir
+    logs_dir = dbt_project_path / "logs"
+    logs_dir.mkdir(exist_ok=True)
+
+    dbt_log_file = logs_dir / "dbt.log"
+    if dbt_log_file.exists():
+        print(f"⚠️  {dbt_log_file} already exists, skipping...")
+    else:
+        dbt_log_file.touch()
+        print(f"✅ Created {dbt_log_file}")
+
     print("\n" + "=" * 70)
     print("✅ Initialization complete!")
     print("\nNext steps:")
