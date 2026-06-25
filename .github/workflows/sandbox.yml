@@ -55,43 +55,24 @@ jobs:
       - name: Apply fix to model file
         run: |
           FILE_PATH="${{ steps.extract.outputs.file_path }}"
+          PROJECT_DIR="tests/fixtures/dbt_project"
 
-          echo "Applying fix to $FILE_PATH..."
+          echo "Applying fix to $PROJECT_DIR/$FILE_PATH..."
 
           # Create directory if it doesn't exist
-          mkdir -p "$(dirname "$FILE_PATH")"
+          mkdir -p "$PROJECT_DIR/$(dirname "$FILE_PATH")"
 
           # Extract fixed content from JSON and write to file
-          jq -r '.fixed_content' /tmp/fix_data.json > "$FILE_PATH"
+          jq -r '.fixed_content' /tmp/fix_data.json > "$PROJECT_DIR/$FILE_PATH"
 
           echo "Fix applied successfully"
-          echo "File size: $(wc -c < "$FILE_PATH") bytes"
-
-      - name: Create dbt_project.yml if missing
-        run: |
-          if [ ! -f "dbt_project.yml" ]; then
-            echo "Creating minimal dbt_project.yml..."
-            cat > dbt_project.yml <<EOF
-          name: 'sandbox_project'
-          version: '1.0.0'
-          config-version: 2
-
-          profile: 'sandbox'
-
-          model-paths: ["models"]
-          seed-paths: ["seeds"]
-          test-paths: ["tests"]
-
-          models:
-            sandbox_project:
-              +materialized: table
-          EOF
-          fi
+          echo "File size: $(wc -c < "$PROJECT_DIR/$FILE_PATH") bytes"
 
       - name: Create profiles.yml for DuckDB
         run: |
-          mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml <<EOF
+          PROJECT_DIR="tests/fixtures/dbt_project"
+          mkdir -p "$PROJECT_DIR"
+          cat > "$PROJECT_DIR/profiles.yml" <<EOF
           sandbox:
             target: dev
             outputs:
@@ -101,46 +82,48 @@ jobs:
                 threads: 1
           EOF
 
-          echo "DuckDB profile created"
+          echo "DuckDB profile created at $PROJECT_DIR/profiles.yml"
 
       - name: Generate synthetic seed data
         run: |
+          PROJECT_DIR="tests/fixtures/dbt_project"
+
           # Create seeds directory if it doesn't exist
-          mkdir -p seeds
+          mkdir -p "$PROJECT_DIR/seeds"
 
           # Generate a simple seed file if none exist
-          if [ ! "$(ls -A seeds/*.csv 2>/dev/null)" ]; then
+          if [ ! "$(ls -A "$PROJECT_DIR/seeds"/*.csv 2>/dev/null)" ]; then
             echo "Creating synthetic seed data..."
-            cat > seeds/sample_data.csv <<EOF
+            cat > "$PROJECT_DIR/seeds/sample_data.csv" <<EOF
           id,name,value
           1,test_record_1,100
           2,test_record_2,200
           3,test_record_3,300
           EOF
-            echo "Synthetic seed created: seeds/sample_data.csv"
+            echo "Synthetic seed created: $PROJECT_DIR/seeds/sample_data.csv"
           else
             echo "Existing seed files found"
           fi
 
       - name: Run dbt debug
         run: |
-          dbt debug --profile sandbox
+          dbt debug --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project
 
       - name: Run dbt seed
         run: |
-          dbt seed --profile sandbox --full-refresh
+          dbt seed --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project --full-refresh
 
       - name: Run dbt run
         id: dbt_run
         run: |
           echo "Running dbt models with applied fix..."
-          dbt run --profile sandbox
+          dbt run --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project
 
       - name: Run dbt test
         id: dbt_test
         run: |
           echo "Running dbt tests..."
-          dbt test --profile sandbox || echo "No tests found or tests failed"
+          dbt test --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project || echo "No tests found or tests failed"
 
       - name: Verify fix success
         run: |
