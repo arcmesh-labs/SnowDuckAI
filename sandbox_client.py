@@ -75,6 +75,8 @@ class GHAClient(SandboxClient):
         Returns:
             Run ID as string
         """
+        from datetime import datetime, timezone
+
         url = f"{self.api_base}/repos/{self.repo}/actions/workflows/{self.workflow_file}/dispatches"
 
         import json
@@ -92,24 +94,65 @@ class GHAClient(SandboxClient):
             "Content-Type": "application/json"
         }
 
+        # Record the trigger time in UTC
+        trigger_time = datetime.now(timezone.utc)
+        print(f"  📤 Triggering workflow at {trigger_time.isoformat()}")
+
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
-        time.sleep(2)
+        # Wait longer for GitHub to register the run
+        print(f"  ⏳ Waiting for GitHub to register the workflow run...")
+        time.sleep(5)
 
+        # Poll for the run with retries
         runs_url = f"{self.api_base}/repos/{self.repo}/actions/workflows/{self.workflow_file}/runs"
-        runs_response = requests.get(
-            runs_url,
-            headers=headers,
-            params={"per_page": 1, "status": "in_progress,queued"}
-        )
-        runs_response.raise_for_status()
+        max_poll_attempts = 6
+        poll_wait = 2
 
-        runs = runs_response.json()
-        if runs["workflow_runs"]:
-            return str(runs["workflow_runs"][0]["id"])
+        for attempt in range(max_poll_attempts):
+            runs_response = requests.get(
+                runs_url,
+                headers=headers,
+                params={
+                    "per_page": 10,
+                    "event": "workflow_dispatch"
+                }
+            )
+            runs_response.raise_for_status()
 
-        raise RuntimeError("Failed to find triggered workflow run")
+            runs_data = runs_response.json()
+            workflow_runs = runs_data.get("workflow_runs", [])
+
+            print(f"  🔍 Poll attempt {attempt + 1}/{max_poll_attempts}: Found {len(workflow_runs)} workflow_dispatch runs")
+
+            # Debug: show the runs we found
+            for i, run in enumerate(workflow_runs[:3]):
+                run_time = datetime.fromisoformat(run["created_at"].replace('Z', '+00:00'))
+                time_diff = (run_time - trigger_time).total_seconds()
+                print(f"     Run {i + 1}: ID={run['id']}, status={run['status']}, created={run['created_at']} (diff: {time_diff:.1f}s)")
+
+            # Find runs created after we triggered (within 60 second window)
+            for run in workflow_runs:
+                run_created_at = datetime.fromisoformat(run["created_at"].replace('Z', '+00:00'))
+                time_diff = (run_created_at - trigger_time).total_seconds()
+
+                # Run should be created within -5 to +60 seconds of trigger time
+                # (allow -5s for clock skew)
+                if -5 <= time_diff <= 60:
+                    print(f"  ✅ Found matching run: ID={run['id']} (created {time_diff:.1f}s after trigger)")
+                    return str(run["id"])
+
+            if attempt < max_poll_attempts - 1:
+                print(f"     No matching run found yet, waiting {poll_wait}s before retry...")
+                time.sleep(poll_wait)
+
+        # Final debug output
+        print(f"  ❌ Failed to find triggered run after {max_poll_attempts} attempts")
+        print(f"     Trigger time: {trigger_time.isoformat()}")
+        print(f"     Latest runs: {json.dumps([{'id': r['id'], 'created_at': r['created_at'], 'status': r['status']} for r in workflow_runs[:3]], indent=2)}")
+
+        raise RuntimeError("Failed to find triggered workflow run after polling")
 
     def _wait_for_completion(self, run_id: str) -> Dict[str, Any]:
         """Wait for workflow run to complete and return results.
