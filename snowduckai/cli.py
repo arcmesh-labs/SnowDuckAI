@@ -17,7 +17,8 @@ def cmd_init():
 
     Creates:
     - .github/workflows/sandbox.yml (copied from package)
-    - snowduckai.yml (config template with placeholders)
+    - .snowduckai/config.yml (config template with placeholders)
+    - .snowduckai/config.md (documentation)
     """
     print("🚀 Initializing SnowDuckAI in current directory...")
 
@@ -43,8 +44,12 @@ def cmd_init():
             print(f"   Make sure SnowDuckAI is properly installed.")
             sys.exit(1)
 
-    # Create snowduckai.yml config template
-    config_file = current_dir / "snowduckai.yml"
+    # Create .snowduckai/ directory
+    snowduckai_dir = current_dir / ".snowduckai"
+    snowduckai_dir.mkdir(exist_ok=True)
+
+    # Create .snowduckai/config.yml config template
+    config_file = snowduckai_dir / "config.yml"
 
     if config_file.exists():
         print(f"⚠️  {config_file} already exists, skipping...")
@@ -82,10 +87,48 @@ notify:
         config_file.write_text(config_template)
         print(f"✅ Created {config_file}")
 
+    # Create .snowduckai/config.md documentation
+    doc_file = snowduckai_dir / "config.md"
+
+    if doc_file.exists():
+        print(f"⚠️  {doc_file} already exists, skipping...")
+    else:
+        doc_template = """# SnowDuckAI Configuration Documentation
+
+This directory contains SnowDuckAI configuration and state.
+
+## config.yml
+
+Main configuration file for SnowDuckAI. See inline comments for details.
+
+### Environment Variables
+
+The following environment variables are used:
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`: LLM provider API key
+- `GITHUB_TOKEN`: GitHub personal access token for creating PRs
+- `SMTP_USER`, `SMTP_PASSWORD`: Email notification credentials (if using email)
+
+### Configuration Sections
+
+- **llm**: LLM provider settings (Anthropic, OpenAI, or Ollama)
+- **sandbox**: Sandbox runner configuration (GitHub Actions or self-hosted)
+- **git**: Git provider settings (GitHub, GitLab, or Bitbucket)
+- **dbt**: dbt project paths and settings
+- **notify**: Notification channel configuration (email, Slack, or Teams)
+
+## Commands
+
+- `sd init`: Initialize SnowDuckAI in current project
+- `sd debug`: Run diagnostic agent on dbt error log
+- `sd watch`: Watch dbt.log and trigger agent automatically on errors
+"""
+        doc_file.write_text(doc_template)
+        print(f"✅ Created {doc_file}")
+
     print("\n" + "=" * 70)
     print("✅ Initialization complete!")
     print("\nNext steps:")
-    print("1. Edit snowduckai.yml and fill in your API keys and GitHub repo")
+    print("1. Edit .snowduckai/config.yml and fill in your API keys and GitHub repo")
     print("2. Set environment variables: ANTHROPIC_API_KEY, GITHUB_TOKEN")
     print("3. Run: sd debug")
     print("=" * 70)
@@ -107,7 +150,7 @@ def cmd_debug(args):
         config = load_config(config_path)
     except FileNotFoundError:
         print(f"❌ Error: Config file not found: {config_path}")
-        print(f"\nRun 'sd init' first to create snowduckai.yml")
+        print(f"\nRun 'sd init' first to create .snowduckai/config.yml")
         sys.exit(1)
     except Exception as e:
         print(f"❌ Error loading config: {e}")
@@ -190,7 +233,7 @@ def cmd_watch(args):
         config = load_config(config_path)
     except FileNotFoundError:
         print(f"❌ Error: Config file not found: {config_path}")
-        print(f"\nRun 'sd init' first to create snowduckai.yml")
+        print(f"\nRun 'sd init' first to create .snowduckai/config.yml")
         sys.exit(1)
     except Exception as e:
         print(f"❌ Error loading config: {e}")
@@ -353,8 +396,8 @@ Environment variables:
     )
     debug_parser.add_argument(
         "--config",
-        default="snowduckai.yml",
-        help="Path to config file (default: snowduckai.yml)"
+        default=".snowduckai/config.yml",
+        help="Path to config file (default: .snowduckai/config.yml)"
     )
     debug_parser.add_argument(
         "--diagnose",
@@ -369,8 +412,8 @@ Environment variables:
     )
     watch_parser.add_argument(
         "--config",
-        default="snowduckai.yml",
-        help="Path to config file (default: snowduckai.yml)"
+        default=".snowduckai/config.yml",
+        help="Path to config file (default: .snowduckai/config.yml)"
     )
 
     args = parser.parse_args()

@@ -632,11 +632,11 @@ IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any ot
         }
 
 
-def load_config(config_path: str = "config.yml") -> Dict[str, Any]:
+def load_config(config_path: str = ".snowduckai/config.yml") -> Dict[str, Any]:
     """Load configuration from YAML file.
 
     Args:
-        config_path: Path to config.yml
+        config_path: Path to config.yml (default: .snowduckai/config.yml)
 
     Returns:
         Configuration dict
@@ -647,6 +647,13 @@ def load_config(config_path: str = "config.yml") -> Dict[str, Any]:
         raise ImportError("PyYAML not installed. Install with: pip install pyyaml")
 
     config_path = Path(config_path)
+
+    # If default path and doesn't exist, try fallback to old location
+    if config_path == Path(".snowduckai/config.yml") and not config_path.exists():
+        fallback_path = Path("snowduckai.yml")
+        if fallback_path.exists():
+            config_path = fallback_path
+
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -691,8 +698,8 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default="config.yml",
-        help="Path to config.yml (default: config.yml)"
+        default=".snowduckai/config.yml",
+        help="Path to config.yml (default: .snowduckai/config.yml)"
     )
     parser.add_argument(
         "--log",
