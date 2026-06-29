@@ -87,9 +87,20 @@ jobs:
       - name: Create profiles.yml for DuckDB
         run: |
           PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
+
+          # Read profile name from dbt_project.yml
+          PROFILE_NAME=$(grep '^profile:' "$PROJECT_DIR/dbt_project.yml" | awk '{print $2}' | tr -d "'\"")
+
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "❌ Error: Could not find 'profile:' in dbt_project.yml"
+            exit 1
+          fi
+
+          echo "Using profile name: $PROFILE_NAME"
+
           mkdir -p "$PROJECT_DIR"
           cat > "$PROJECT_DIR/profiles.yml" <<EOF
-          project_red_test:
+          ${PROFILE_NAME}:
             target: dev
             outputs:
               dev:
