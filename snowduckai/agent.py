@@ -53,36 +53,7 @@ class SnowDuckAIAgent:
         Returns:
             List of tool definitions in Anthropic format
         """
-        tools = [
-            {
-                "name": "read_file",
-                "description": "Read the contents of a file from the dbt project. Use this to examine SQL models, schema files, or configuration files.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Path to the file relative to the dbt project root (e.g., 'models/staging/stg_users.sql')"
-                        }
-                    },
-                    "required": ["path"]
-                }
-            },
-            {
-                "name": "list_directory",
-                "description": "List files and directories in a given path within the dbt project. Use this to explore the project structure.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Path to the directory relative to the dbt project root (e.g., 'models/staging'). Use '.' for the root."
-                        }
-                    },
-                    "required": ["path"]
-                }
-            }
-        ]
+        tools = []
 
         # Add propose_fix tool for providers that support tool calling (anthropic, openai)
         # Ollama uses text-based responses instead
@@ -127,11 +98,7 @@ class SnowDuckAIAgent:
         Returns:
             String result of the tool execution
         """
-        if tool_name == "read_file":
-            return self._read_file(tool_input["path"])
-        elif tool_name == "list_directory":
-            return self._list_directory(tool_input["path"])
-        elif tool_name == "propose_fix":
+        if tool_name == "propose_fix":
             return self._propose_fix(tool_input)
         else:
             return f"Error: Unknown tool '{tool_name}'"
@@ -308,22 +275,80 @@ class SnowDuckAIAgent:
         with open(manifest_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def _create_initial_prompt(self, error_log: str, manifest: Optional[Dict[str, Any]]) -> str:
-        """Create the initial diagnostic prompt for the LLM.
+    def _extract_affected_file_path(self, error_log: str) -> Optional[str]:
+        """Extract the affected file path from the error log.
+
+        Looks for patterns like:
+        - "Failure in model <model_name> (models/path/to/file.sql)"
+        - "Runtime Error in model <model_name> (models/path/to/file.sql)"
+        - "Compilation Error in model <model_name> (models/path/to/file.sql)"
+
+        Args:
+            error_log: dbt error log content
+
+        Returns:
+            Relative file path or None if not found
+        """
+        import re
+
+        # Pattern 1: "Failure in model ... (path/to/file.sql)"
+        match = re.search(r'(?:Failure|Runtime Error|Compilation Error) in model [^\(]+\(([^)]+\.sql)\)', error_log, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Pattern 2: Look for file paths in error context
+        match = re.search(r'(models/[^\s\)]+\.sql)', error_log)
+        if match:
+            return match.group(1)
+
+        return None
+
+    def _gather_context(self, affected_file_path: Optional[str]) -> Dict[str, Any]:
+        """Gather all relevant context deterministically before LLM invocation.
+
+        Args:
+            affected_file_path: Path to the affected file (if known)
+
+        Returns:
+            Dict with file_content, models_structure, etc.
+        """
+        context = {
+            "file_content": None,
+            "file_path": affected_file_path,
+            "models_structure": None
+        }
+
+        # Read the affected file if we found it
+        if affected_file_path:
+            file_path = self.dbt_project_path / affected_file_path
+            if file_path.exists():
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        context["file_content"] = f.read()
+                except Exception as e:
+                    context["file_content"] = f"Error reading file: {str(e)}"
+            else:
+                context["file_content"] = f"File not found: {affected_file_path}"
+
+        # List models/ directory structure
+        models_dir = self.dbt_project_path / "models"
+        if models_dir.exists():
+            context["models_structure"] = self._list_directory("models")
+
+        return context
+
+    def _create_initial_prompt(self, error_log: str, manifest: Optional[Dict[str, Any]], context: Dict[str, Any]) -> str:
+        """Create the initial diagnostic prompt for the LLM with all context.
 
         Args:
             error_log: dbt error log content
             manifest: Optional dbt manifest
+            context: Gathered context (file content, directory structure)
 
         Returns:
             Initial prompt text
         """
         prompt = f"""You are a dbt debugging agent. A dbt pipeline has failed and you need to diagnose the error and propose a fix.
-
-Your task:
-1. Analyze the error log below
-2. Use the available tools to explore the dbt project and understand the issue
-3. Once you understand the problem, respond with the fix as JSON
 
 dbt Error Log:
 ```
@@ -339,14 +364,27 @@ dbt Manifest (graph and schema information):
 ```
 """
 
+        # Include affected file content
+        if context.get("file_path") and context.get("file_content"):
+            prompt += f"""
+Affected File: {context['file_path']}
+```sql
+{context['file_content']}
+```
+"""
+
+        # Include models directory structure
+        if context.get("models_structure"):
+            prompt += f"""
+Models Directory Structure:
+{context['models_structure']}
+"""
+
         prompt += """
-Available tools:
-- read_file: Read any file from the dbt project
-- list_directory: List contents of any directory
+Your task:
+Analyze the error log and the affected file content above, then propose a fix.
 
-Start by analyzing the error and determining what files you need to examine.
-
-When you have identified the fix, respond with a JSON object in this exact format:
+Return ONLY a JSON object with the fix in this exact format:
 {{
   "file_path": "path/to/file.sql",
   "original_content": "the current file content",
@@ -354,7 +392,10 @@ When you have identified the fix, respond with a JSON object in this exact forma
   "explanation": "brief explanation of what was wrong and how you fixed it"
 }}
 
-IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any other text before or after the JSON.
+IMPORTANT:
+- Return ONLY the JSON object, with no additional text or markdown formatting
+- Preserve all {{ ref() }} and {{ source() }} Jinja syntax exactly
+- Do not add backticks or any other wrapper around the JSON
 """
         return prompt
 
@@ -373,8 +414,22 @@ IMPORTANT: Return ONLY the JSON object when proposing the fix. Do not add any ot
         print("📋 Loading manifest...")
         manifest = self._load_manifest()
 
+        print("🔎 Extracting affected file path from error log...")
+        affected_file_path = self._extract_affected_file_path(self.error_log)
+        if affected_file_path:
+            print(f"   Found: {affected_file_path}")
+        else:
+            print("   Could not determine affected file from error log")
+
+        print("📂 Gathering context...")
+        context = self._gather_context(affected_file_path)
+        if context.get("file_content"):
+            print(f"   Read {len(context['file_content'])} chars from {affected_file_path}")
+        if context.get("models_structure"):
+            print("   Listed models/ directory structure")
+
         print("🤖 Starting diagnostic loop...")
-        initial_prompt = self._create_initial_prompt(self.error_log, manifest)
+        initial_prompt = self._create_initial_prompt(self.error_log, manifest, context)
 
         self.conversation_history = [
             {"role": "user", "content": initial_prompt}
