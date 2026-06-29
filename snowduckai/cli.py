@@ -125,19 +125,6 @@ The following environment variables are used:
         doc_file.write_text(doc_template)
         print(f"✅ Created {doc_file}")
 
-    # Create logs/ directory and dbt.log file in dbt.project_path
-    # Default project_path is current directory (.)
-    dbt_project_path = current_dir
-    logs_dir = dbt_project_path / "logs"
-    logs_dir.mkdir(exist_ok=True)
-
-    dbt_log_file = logs_dir / "dbt.log"
-    if dbt_log_file.exists():
-        print(f"⚠️  {dbt_log_file} already exists, skipping...")
-    else:
-        dbt_log_file.touch()
-        print(f"✅ Created {dbt_log_file}")
-
     print("\n" + "=" * 70)
     print("✅ Initialization complete!")
     print("\nNext steps:")
@@ -174,6 +161,12 @@ def cmd_debug(args):
     if not log_path:
         print(f"❌ Error: dbt.log_path not specified in {config_path}")
         print(f"\nAdd 'log_path: logs/dbt.log' under the 'dbt:' section in your config")
+        sys.exit(1)
+
+    # Check if log file exists
+    log_file = Path(log_path)
+    if not log_file.exists():
+        print(f"❌ dbt log not found at {log_path}. Have you run 'dbt run' yet?")
         sys.exit(1)
 
     # Run the agent
@@ -260,6 +253,11 @@ def cmd_watch(args):
         sys.exit(1)
 
     log_path = Path(log_path_str)
+
+    # Check if log file exists
+    if not log_path.exists():
+        print(f"❌ dbt log not found at {log_path_str}. Have you run 'dbt run' yet?")
+        sys.exit(1)
 
     print("👀 SnowDuckAI — Watching for dbt errors")
     print("=" * 70)

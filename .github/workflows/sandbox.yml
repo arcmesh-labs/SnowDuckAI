@@ -38,6 +38,22 @@ jobs:
           cat /tmp/fix_data.json
           echo "Fix data decoded successfully"
 
+      - name: Find dbt project root
+        id: find_project
+        run: |
+          # Find dbt_project.yml in the repository (exclude target directories)
+          PROJECT_FILE=$(find . -name "dbt_project.yml" -not -path "*/target/*" | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "❌ Error: No dbt_project.yml found in repository"
+            exit 1
+          fi
+
+          # Get the directory containing dbt_project.yml
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+          echo "Found dbt project at: $PROJECT_DIR"
+
       - name: Extract fix details
         id: extract
         run: |
@@ -55,7 +71,7 @@ jobs:
       - name: Apply fix to model file
         run: |
           FILE_PATH="${{ steps.extract.outputs.file_path }}"
-          PROJECT_DIR="tests/fixtures/dbt_project"
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
 
           echo "Applying fix to $PROJECT_DIR/$FILE_PATH..."
 
@@ -70,7 +86,7 @@ jobs:
 
       - name: Create profiles.yml for DuckDB
         run: |
-          PROJECT_DIR="tests/fixtures/dbt_project"
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
           mkdir -p "$PROJECT_DIR"
           cat > "$PROJECT_DIR/profiles.yml" <<EOF
           project_red_test:
@@ -84,46 +100,29 @@ jobs:
 
           echo "DuckDB profile created at $PROJECT_DIR/profiles.yml"
 
-      - name: Generate synthetic seed data
-        run: |
-          PROJECT_DIR="tests/fixtures/dbt_project"
-
-          # Create seeds directory if it doesn't exist
-          mkdir -p "$PROJECT_DIR/seeds"
-
-          # Generate a simple seed file if none exist
-          if [ ! "$(ls -A "$PROJECT_DIR/seeds"/*.csv 2>/dev/null)" ]; then
-            echo "Creating synthetic seed data..."
-            cat > "$PROJECT_DIR/seeds/sample_data.csv" <<EOF
-          id,name,value
-          1,test_record_1,100
-          2,test_record_2,200
-          3,test_record_3,300
-          EOF
-            echo "Synthetic seed created: $PROJECT_DIR/seeds/sample_data.csv"
-          else
-            echo "Existing seed files found"
-          fi
-
       - name: Run dbt debug
         run: |
-          dbt debug --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
+          dbt debug --project-dir "$PROJECT_DIR" --profiles-dir "$PROJECT_DIR"
 
       - name: Run dbt seed
         run: |
-          dbt seed --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project --full-refresh
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
+          dbt seed --project-dir "$PROJECT_DIR" --profiles-dir "$PROJECT_DIR" --full-refresh
 
       - name: Run dbt run
         id: dbt_run
         run: |
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
           echo "Running dbt models with applied fix..."
-          dbt run --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project
+          dbt run --project-dir "$PROJECT_DIR" --profiles-dir "$PROJECT_DIR"
 
       - name: Run dbt test
         id: dbt_test
         run: |
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
           echo "Running dbt tests..."
-          dbt test --project-dir tests/fixtures/dbt_project --profiles-dir tests/fixtures/dbt_project || echo "No tests found or tests failed"
+          dbt test --project-dir "$PROJECT_DIR" --profiles-dir "$PROJECT_DIR" || echo "No tests found or tests failed"
 
       - name: Verify fix success
         run: |
